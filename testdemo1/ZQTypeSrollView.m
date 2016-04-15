@@ -13,13 +13,12 @@
 @interface ZQTypeSrollView()<UIScrollViewDelegate>
 
 @property(nonatomic,weak)ZQBackView *backView;
-@property(nonatomic,weak)UIScrollView *scrollView;
 @property(nonatomic,strong)NSMutableArray *labelArr;
 @property(nonatomic,assign)NSInteger lastSelectIndex;
-/**如果是外部控制typeView移动时的bool标签*/
-@property(nonatomic,assign)BOOL outCall;
-/**如果是内部点击或者拖动,控制typeView移动时的bool标签*/
-@property(nonatomic,assign)BOOL isNotDrag;
+@property(nonatomic,strong)UITapGestureRecognizer *tap;
+@property(nonatomic,strong)UITapGestureRecognizer *dtap;
+@property(nonatomic,assign)BOOL shouldNotMoveLater;
+@property(nonatomic,strong)NSTimer *timer;
 
 @end
 
@@ -55,7 +54,7 @@
     scrollView.pagingEnabled = YES;
     scrollView.showsHorizontalScrollIndicator = NO;
     scrollView.clipsToBounds = NO;
-    scrollView.bounces = NO;
+//    scrollView.bounces = NO;
     scrollView.delegate = self;
 
     self.scrollView = scrollView;
@@ -64,12 +63,13 @@
     UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(tapView:)];
     tap.numberOfTapsRequired = 1;
     [scrollView addGestureRecognizer:tap];
-
+    self.tap = tap;
     UITapGestureRecognizer *dtap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(tapView:)];
     dtap.numberOfTapsRequired = 2;
     [tap requireGestureRecognizerToFail:dtap];
     [scrollView addGestureRecognizer:dtap];
-    
+    self.dtap = dtap;
+
     
     [scrollView mas_makeConstraints:^(MASConstraintMaker *make) {
         make.top.equalTo(backView);
@@ -90,7 +90,6 @@
     UIView *lastView = nil;
     for (NSInteger i = 0; i < 5; i++) {
         UILabel *configView = [[UILabel alloc] init];
-//        configView.text = [NSString stringWithFormat:@"测试%ld",i];
         configView.textAlignment = NSTextAlignmentCenter;
         configView.font = [UIFont systemFontOfSize:15];
         configView.textColor = [UIColor blackColor];
@@ -117,6 +116,8 @@
 
 -(void)willMoveToSuperview:(UIView *)newSuperview{
     [self scrollViewDidScroll:self.scrollView];
+    [self scrollViewDidEndDecelerating:self.scrollView];
+    
 
 }
 
@@ -129,23 +130,30 @@
 }
 
 -(void)tapView:(UITapGestureRecognizer *)tap{
+    if (self.shouldNotMoveLater) {
+        self.shouldNotMoveLater = NO;
+        return;
+    }
+    NSLog(@"tap");
+    if (self.typeViewDraging) {
+        self.typeViewDraging();
+    }
     
 
     CGPoint point = [tap locationInView:self];
-    /**如果外部正在调用方法，scrollView正在移动，那么就返回*/
-    if(self.outCall == YES)
-        return;
-    
-    self.outCall = NO;
+
     [self moveTypeViewWithPoint:point];
     
 
 
 }
-/**  不是拖动的时候调用改方法*/
+
 -(void)moveTypeViewWithPoint:(CGPoint)point{
-    self.scrollView.scrollEnabled = NO;
-    self.isNotDrag = YES;
+
+
+    
+//    self.scrollView.scrollEnabled = NO;
+    [self lockScrollView];
 
     if (point.x < [UIScreen mainScreen].bounds.size.width / 3.0){
         self.selectIndex --;
@@ -168,58 +176,58 @@
     }
     CGPoint p1 = CGPointMake(self.selectIndex * [UIScreen mainScreen].bounds.size.width / 3.0,0);
     
+    
     /** 非拖动的时候让他点击的时候直接发出移动消息*/
     [self.scrollView setContentOffset:p1 animated:YES];
-    [self shouldChangeController];
+
     
     
 }
 
 -(void)scrollViewDidScroll:(UIScrollView *)scrollView{
-    if (self.isNotDrag) {
-        /** 非拖动的时候让他点击的时候直接发出移动消息*/
-    }else{
-        /** 拖动的时候让他拖到临界点的时候再发出移动消息*/
-        self.selectIndex = scrollView.contentOffset.x / ([UIScreen mainScreen].bounds.size.width / 3.0) + 0.5;
-        [self shouldChangeController];
+    
+    self.selectIndex = scrollView.contentOffset.x / ([UIScreen mainScreen].bounds.size.width / 3.0) + 0.5;
+    if (self.selectIndex < 0) {
+        self.selectIndex = 0;
+    }else if (self.selectIndex > self.types.count - 1){
+        self.selectIndex = self.types.count - 1;
     }
+    [self shouldChangeLabel];
+
 
 }
 
-/** 下面两个停止方法分别在拖动和setoffset停止后调用*/
+/** 下面两个停止方法分别在拖动*/
 -(void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView{
-    self.isNotDrag = NO;
+
     /** 没滚就不要让scrollView响应事件了*/
-    self.scrollView.scrollEnabled = YES;
-    self.outCall = NO;
+//    self.scrollView.scrollEnabled = YES;
+    [self unlockScrollView];
 
+    
+    [self shouldChangeController];
+    self.lastSelectIndex = self.selectIndex;
 }
-
+/** setoffset停止后调用*/
 -(void)scrollViewDidEndScrollingAnimation:(UIScrollView *)scrollView{
 
-    self.isNotDrag = NO;
-    self.scrollView.scrollEnabled = YES;
-    self.outCall = NO;
+    /** 没滚就不要让scrollView响应事件了*/
+    [self unlockScrollView];
+
+    if (self.shouldNotMoveLater) {
+//        self.lastSelectIndex = self.selectIndex;
+        self.shouldNotMoveLater = NO;
+//        [self unlockScrollView];
+        return;
+    }
+    [self shouldChangeController];
+    self.lastSelectIndex = self.selectIndex;
 
 }
 /** 改方法发出typeView更改了item的消息，并且设置label*/
--(void)shouldChangeController{
+-(void)shouldChangeLabel{
     
-    if (self.lastSelectIndex != self.selectIndex && self.outCall == NO) {
-
-        if (self.selectIndex > self.lastSelectIndex) {
-            NSLog(@"->");
-            if (self.typeViewMove) {
-                self.typeViewMove(YES);
-            }
-        }else{
-            if (self.typeViewMove) {
-                self.typeViewMove(NO);
-            }
-            NSLog(@"<-");
-        }
-    }
-    self.lastSelectIndex = self.selectIndex;
+    
     for (NSInteger i = 0; i < self.labelArr.count; i++) {
         UILabel *selectLabel = self.labelArr[i];
         
@@ -236,17 +244,106 @@
     }
 }
 
-/** 外部方法*/
--(void)goReverseItem{
-    self.outCall = YES;
-    [self moveTypeViewWithPoint:CGPointMake(0, 0)];
+-(void)shouldChangeController{
+    NSLog(@"now's index%ld last's index%ld",self.selectIndex,self.lastSelectIndex);
+    if (self.lastSelectIndex != self.selectIndex) {
 
-}
+        if (self.selectIndex > self.lastSelectIndex) {
 
--(void)goForwardItem{
-    self.outCall = YES;
-    [self moveTypeViewWithPoint:CGPointMake([UIScreen mainScreen].bounds.size.width, 0)];
+            NSLog(@"->");
+            if (self.typeViewMove) {
+                self.typeViewMove(ZQTypeSrollViewMoveTypeForward);
+            }
+        }else if (self.selectIndex < self.lastSelectIndex){
+
+            if (self.typeViewMove) {
+                self.typeViewMove(ZQTypeSrollViewMoveTypeReverse);
+            }
+            NSLog(@"<-");
+        }else{
+
+        }
         
+    }else{
+
+        if (self.typeViewMove) {
+            self.typeViewMove(ZQTypeSrollViewMoveTypeNoMove);
+        }
+        NSLog(@"--");
+        
+    }
+    
 }
+
+-(void)scrollViewWillBeginDragging:(UIScrollView *)scrollView{
+    if (self.typeViewDraging) {
+        self.typeViewDraging();
+    }
+}
+
+-(void)scrollViewDidEndDragging:(UIScrollView *)scrollView willDecelerate:(BOOL)decelerate{
+
+}
+
+
+
+-(void)lockScrollView{
+    self.scrollView.userInteractionEnabled = NO;
+    self.scrollView.scrollEnabled = NO;
+    self.tap.enabled = NO;
+    self.dtap.enabled = NO;
+}
+
+-(void)unlockScrollView{
+    self.scrollView.userInteractionEnabled = YES;
+    self.scrollView.scrollEnabled = YES;
+    self.tap.enabled = YES;
+    self.dtap.enabled = YES;
+
+}
+
+-(void)timerTask{
+    self.shouldNotMoveLater = NO;
+    [self.timer invalidate];
+    self.timer = nil;
+}
+
+-(void)moveItem{
+
+    CGPoint p1 = CGPointMake(self.selectIndex * [UIScreen mainScreen].bounds.size.width / 3.0,0);
+//    self.shouldNotMoveLater = YES;
+
+    if (self.scrollView.contentOffset.x == p1.x) {
+        
+        return;
+    }
+    
+    [self.scrollView setContentOffset:p1 animated:NO];
+    //set 不会有end
+    self.lastSelectIndex = self.selectIndex;
+}
+
+///** 外部方法*/
+//-(void)goReverseItem{
+//    NSLog(@"goReverseItem");
+//    self.shouldNotMoveLater = YES;
+//    [self moveTypeViewWithPoint:CGPointMake(0, 0)];
+//
+//}
+//
+//-(void)goForwardItem{
+//    NSLog(@"goForwardItem");
+//    self.shouldNotMoveLater = YES;
+//    [self moveTypeViewWithPoint:CGPointMake([UIScreen mainScreen].bounds.size.width, 0)];
+//
+//}
+//
+//-(void)noMoveItem{
+//    NSLog(@"noMoveItem");
+//
+//    self.shouldNotMoveLater = YES;
+//    [self shouldChangeController];
+//
+//}
 
 @end

@@ -14,9 +14,14 @@
 @interface ViewController ()<UIScrollViewDelegate,UIPageViewControllerDataSource,UIPageViewControllerDelegate>
 
 @property(nonatomic,strong)UIPageViewController *pageViewController;
+@property(nonatomic,weak)UIScrollView *pageScrollView;
 @property(nonatomic,strong)NSMutableArray *testControllers;
 @property(nonatomic,weak)ZQTypeSrollView *typeView;
 @property(nonatomic,strong)NSArray *types;
+@property(nonatomic,strong)NSTimer *timer;
+@property(nonatomic,strong)NSTimer *unlockTimer;
+@property(nonatomic,strong)NSTimer *testErrorTimer;
+
 @end
 
 @implementation ViewController
@@ -46,14 +51,19 @@
 -(void)setupTypeView{
     ZQTypeSrollView *typeView = [[ZQTypeSrollView alloc] init];
 
-    typeView.typeViewMove = ^(BOOL isForward){
-        if (isForward) {
-            [self movePageViewControllerWithDirection:UIPageViewControllerNavigationDirectionForward];
-        }else{
-            [self movePageViewControllerWithDirection:UIPageViewControllerNavigationDirectionReverse];
+    typeView.typeViewMove = ^(ZQTypeSrollViewMoveType type){
 
-        }
+        [self movePageViewControllerWithMoveType:type];
+
     };
+    
+    typeView.typeViewDraging = ^{
+        self.pageViewController.view.userInteractionEnabled = NO;
+        self.pageScrollView.scrollEnabled = NO;
+    };
+    
+
+    
     typeView.backgroundColor = [UIColor whiteColor];
     typeView.types = self.types;
     self.typeView = typeView;
@@ -87,7 +97,14 @@
         make.bottom.equalTo(self.view);
 
     }];
-    
+    for (UIView *v in self.pageViewController.view.subviews) {
+        if ([v isKindOfClass:[UIScrollView class]]) {
+            ((UIScrollView *)v).delegate = self;
+            ((UIScrollView *)v).bounces = YES;
+
+            self.pageScrollView = (UIScrollView *)v;
+        }
+    }
 
     
 }
@@ -98,6 +115,7 @@
     for (int i = 0; i < self.types.count; i++) {
         ZQTestViewController *testController = [[ZQTestViewController alloc] init];
         testController.name = self.types[i];
+        testController.view.backgroundColor = [UIColor colorWithRed:arc4random_uniform(255)/255.0 green:arc4random_uniform(255)/255.0 blue:arc4random_uniform(255)/255.0 alpha:1];
         [self.testControllers addObject:testController];
         
     }
@@ -106,10 +124,101 @@
     
 }
 
+-(void)enablePageViewController{
+    
+    if (self.timer) {
+        [self.timer invalidate];
+        self.timer = nil;
+    }
+    self.timer = [NSTimer scheduledTimerWithTimeInterval:0.25 target:self selector:@selector(timerTask) userInfo:nil repeats:NO];
 
--(void)movePageViewControllerWithDirection:(NSInteger)direction{
+}
 
+-(void)timerTask{
+    
+    self.pageViewController.view.userInteractionEnabled = YES;
+    self.pageScrollView.scrollEnabled = YES;
+    
+    [self.timer invalidate];
+    self.timer = nil;
+}
+
+-(void)unlockTypeView{
+    
+    if (self.unlockTimer) {
+        [self.unlockTimer invalidate];
+        self.unlockTimer = nil;
+    }
+    self.unlockTimer = [NSTimer scheduledTimerWithTimeInterval:0.3 target:self selector:@selector(unlockTimerTask) userInfo:nil repeats:NO];
+    
+}
+
+-(void)unlockTimerTask{
+    
+    [self.typeView unlockScrollView];
+    [self.unlockTimer invalidate];
+    self.unlockTimer = nil;
+}
+
+-(void)testError{
+    
+    if (self.testErrorTimer) {
+        [self.testErrorTimer invalidate];
+        self.testErrorTimer = nil;
+    }
+    self.testErrorTimer = [NSTimer scheduledTimerWithTimeInterval:1.5 target:self selector:@selector(testErrorTimerTask) userInfo:nil repeats:NO];
+    
+}
+
+-(void)testErrorTimerTask{
+    
+    NSInteger typeViewSelectIndex = self.typeView.scrollView.contentOffset.x / ([UIScreen mainScreen].bounds.size.width / 3.0) + 0.5;
+    if (typeViewSelectIndex < 0) {
+        typeViewSelectIndex = 0;
+    }else if (typeViewSelectIndex > self.types.count - 1){
+        typeViewSelectIndex = self.types.count - 1;
+    }
+    ZQTestViewController* vc = self.pageViewController.viewControllers[0];
+    NSInteger outIndex = [self.types indexOfObject:vc.name];
+    if (outIndex != typeViewSelectIndex) {
+        NSLog(@"errorerrorerrorerrorerrorerrorerrorerrorerrorerrorerrorerrorerrorerrorerrorerrorerrorerrorerrorerrorerrorerrorerrorerrorerrorerrorerrorerror");
+        self.typeView.selectIndex = typeViewSelectIndex;
+        [self.typeView moveItem];
+    }
+    
+
+    
+    if ((self.pageViewController.view.userInteractionEnabled) == NO && (self.typeView.scrollView.scrollEnabled == NO)) {
+        NSLog(@"locklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklocklock");
+        self.pageViewController.view.userInteractionEnabled = NO;
+        self.pageScrollView.scrollEnabled = NO;
+        [self.typeView unlockScrollView];
+    }
+    
+    [self.testErrorTimer invalidate];
+    self.testErrorTimer = nil;
+}
+
+
+-(void)movePageViewControllerWithMoveType:(ZQTypeSrollViewMoveType)type{
+    self.pageViewController.view.userInteractionEnabled = NO;
+    self.pageScrollView.scrollEnabled = NO;
+    __weak typeof(self) weakSelf = self;
+    if (type == ZQTypeSrollViewMoveTypeNoMove) {
+        self.pageViewController.view.userInteractionEnabled = YES;
+        self.pageScrollView.scrollEnabled = YES;
+        return;
+    }
+    NSInteger direction;
+    if (type == ZQTypeSrollViewMoveTypeForward){
+        direction = UIPageViewControllerNavigationDirectionForward;
+    }else{
+        direction = UIPageViewControllerNavigationDirectionReverse;
+    }
+    
     [self.pageViewController setViewControllers:@[self.testControllers[self.typeView.selectIndex]] direction:direction animated:YES completion:^(BOOL finished) {
+        weakSelf.pageViewController.view.userInteractionEnabled = YES;
+        weakSelf.pageScrollView.scrollEnabled = YES;
     }];
 }
 
@@ -136,64 +245,46 @@
 }
 
 -(void)pageViewController:(UIPageViewController *)pageViewController didFinishAnimating:(BOOL)finished previousViewControllers:(NSArray *)previousViewControllers transitionCompleted:(BOOL)completed{
-    
+    if(!completed)return;
     ZQTestViewController *tc = pageViewController.viewControllers[0];
-    NSInteger index = [self.testControllers indexOfObject:tc];
-    if (index > self.typeView.selectIndex) {
-        [self.typeView goForwardItem];
-    }else if (index < self.typeView.selectIndex) {
-        [self.typeView goReverseItem];
-    }else{
-    
-    }
-//    self.selectIndex = index;
+    self.typeView.selectIndex = [self.testControllers indexOfObject:tc];
+}
 
+
+//点击上面滑完
+-(void)scrollViewDidEndScrollingAnimation:(UIScrollView *)scrollView{
+    [self testError];
+}
+//拖动下面滑完
+-(void)scrollViewDidEndDecelerating:(UIScrollView *)scrollView{
+    NSLog(@"movemove");
+    [self.typeView moveItem];
+
+    [self unlockTypeView];
+    
+    [self testError];
+}
+
+-(void)scrollViewDidScroll:(UIScrollView *)scrollView{
+
+    [self testError];
+
+}
+
+-(void)scrollViewWillBeginDecelerating:(UIScrollView *)scrollView{
 
 }
 
 
+-(void)scrollViewWillBeginDragging:(UIScrollView *)scrollView{
+    [self.typeView lockScrollView];
 
-//-(void)downloadMP4{
-//    NSString *urlStr= @"http://flv2.bn.netease.com/videolib3/1511/19/RiCBl0272/SD/RiCBl0272-mobile.mp4";
-//    NSURL *URL = [NSURL URLWithString:urlStr];
-//    
-//    NSURLSessionConfiguration *configuration = [NSURLSessionConfiguration defaultSessionConfiguration];
-//    AFURLSessionManager *manager = [[AFURLSessionManager alloc] initWithSessionConfiguration:configuration];
-//    
-//    //    NSURL *URL = [NSURL URLWithString:@"http://example.com/download.zip"];
-//    NSURLRequest *request = [NSURLRequest requestWithURL:URL];
-//    
-//    NSProgress *progress = nil;
-//    NSURLSessionDownloadTask *downloadTask = [manager downloadTaskWithRequest:request progress:&progress destination:^NSURL *(NSURL *targetPath, NSURLResponse *response) {
-//        
-//        NSURL *documentsDirectoryURL = [[NSFileManager defaultManager] URLForDirectory:NSDocumentDirectory inDomain:NSUserDomainMask appropriateForURL:nil create:NO error:nil];
-//        
-//        return [documentsDirectoryURL URLByAppendingPathComponent:[response suggestedFilename]];
-//        
-//    } completionHandler:^(NSURLResponse *response, NSURL *filePath, NSError *error) {
-//        NSLog(@"File downloaded to: %@", filePath);
-//        [progress removeObserver:self forKeyPath:@"fractionCompleted"];
-//    }];
-//    
-//    [progress addObserver:self
-//               forKeyPath:@"fractionCompleted"
-//                  options:NSKeyValueObservingOptionNew
-//                  context:NULL];
-//    
-//    [downloadTask resume];
-//    
-//}
-//
-//- (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context
-//{
-//    
-//    if ([keyPath isEqualToString:@"fractionCompleted"] && [object isKindOfClass:[NSProgress class]]) {
-//        NSProgress *progress = (NSProgress *)object;
-//        NSLog(@"Progress is %f", progress.fractionCompleted);
-//    }
-//}
-//
+}
 
+-(void)scrollViewDidEndDragging:(UIScrollView *)scrollView willDecelerate:(BOOL)decelerate{
+
+    [self unlockTypeView];
+}
 
 
 @end
